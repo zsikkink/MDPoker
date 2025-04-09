@@ -4,15 +4,14 @@
 cd "$(dirname "$0")"
 
 echo "Installing Node.js dependencies..."
-npm install express
-npm install poker-odds-calculator
+npm install
 
 echo "Installing Python requirements..."
-pip install requests
+pip install requests treys
 
-echo "Testing poker-odds-calculator package..."
-node test-equity.js
+echo "Testing Express service..."
+node -e "const { CardGroup, OddsCalculator } = require('poker-odds-calculator'); console.log('Poker calculator ready!');"
 
 echo "Setup completed!"
 echo "To start the equity calculator service, run: npm start"
-echo "To test the client, run: python equity_client.py"
+echo "To test the client, run: python -m src.simulation.preflop_env"

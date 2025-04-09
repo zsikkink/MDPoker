@@ -1,24 +1,25 @@
-# Poker Equity Calculator Integration
+# MDPoker Equity Calculator Integration
 
-This integration provides a lightweight solution to use the JavaScript-based equity calculator from your Python MDPoker project without the overhead of starting a new Node.js process for each calculation.
+This integration provides a lightweight solution to use the JavaScript-based equity calculator from your Python MDPoker project, allowing accurate poker equity calculations to be used in your MDP simulation environment.
 
 ## How It Works
 
-1. A persistent Node.js Express server exposes the `calculatePlayerEquity` function from `equity_calculator.mjs` as a REST API endpoint.
-2. A Python client sends HTTP requests to this service when equity calculations are needed.
-3. The Node.js service performs the calculations using the JavaScript library and returns the results.
+1. A persistent Node.js Express server directly imports and uses the `calculatePlayerEquity` function from `src/simulation/equity_calculator.mjs` as a REST API endpoint.
+2. The Python `PreflopEnv` class uses the `equity_client.py` module to communicate with this service for equity calculations.
+3. This provides accurate equity calculations for the reward function and winner determination.
 
 ## Benefits
 
-- **Efficiency**: Eliminates Node.js startup time for each calculation by keeping the service running
-- **Simplicity**: Clean separation between JavaScript and Python code
-- **Performance**: Local HTTP requests have minimal overhead compared to process spawning
+- **Efficiency**: The Express server remains running, eliminating Node.js startup time for each calculation
+- **Accuracy**: Uses the powerful JavaScript poker-odds-calculator library for precise equity calculations
+- **Modularity**: Clean separation between JavaScript calculation engine and Python simulation
+- **Graceful Fallback**: Falls back to simpler equity estimations if the service is unavailable
 
 ## Setup Instructions
 
 ### Prerequisites
 
-- Node.js (v14+) and npm installed
+- Node.js (v16+) and npm installed
 - Python 3.x with pip
 - Your conda environment "Poker" activated
 
@@ -35,58 +36,44 @@ Alternatively, install the dependencies manually:
 
 ```bash
 # Node.js dependencies
-npm install express poker-odds-calculator
+npm install
 
 # Python dependencies
 pip install requests
 ```
-
-2. Make sure your `package.json` includes `"type": "module"` to enable ES modules.
 
 ### Starting the Service
 
 Start the Node.js service:
 
 ```bash
-node server.js
+npm start
 ```
 
-You should see output indicating the service is running on http://localhost:3000.
+This will run the server.mjs file, which now directly imports the equity_calculator.mjs module. You should see output indicating the service is running on http://localhost:3000.
 
 ### Testing the Integration
 
-Run the Python client test script:
+The preflop_env.py file includes testing code in its `__main__` section:
 
 ```bash
-python equity_client.py
+python -m src.simulation.preflop_env
 ```
 
-This will perform sample equity calculations and display the results.
+This will perform sample equity calculations and display the results of simulated hands.
 
-## Integration with Your Python Code
+## Integration with Your MDP Model
 
-To use the equity calculator in your existing Python code:
+The `PreflopEnv` class now automatically uses the equity service if it's available. There are two ways to configure it:
 
-1. Import the client:
-
+1. Use with Express service (default):
 ```python
-from equity_client import EquityCalculator
+env = PreflopEnv(use_express_service=True)  # Uses Express equity calculator service
 ```
 
-2. Create an instance of the calculator:
-
+2. Use with fallback calculator only:
 ```python
-calculator = EquityCalculator()
-```
-
-3. Calculate equity:
-
-```python
-# Preflop equity (no board)
-equity = calculator.calculate_equity("AcKh", "QsJd")
-
-# Equity with community cards
-equity = calculator.calculate_equity("AcKh", "QsJd", "Th9d2c")
+env = PreflopEnv(use_express_service=False, equity_calculator=my_simple_calculator)
 ```
 
 ## API Endpoints
@@ -104,10 +91,18 @@ equity = calculator.calculate_equity("AcKh", "QsJd", "Th9d2c")
 
 ## Troubleshooting
 
-- If you encounter connection errors, make sure the Node.js service is running.
-- Check for errors in the Node.js service console output.
-- Verify that the port (default: 3000) is not being used by another application.
+- If the Express service is not available, the PreflopEnv will automatically fall back to a provided equity calculator or simple estimations.
+- Check the Node.js console for any errors if calculations seem incorrect.
+- Verify that port 3000 is available for the service to use.
 
-## Advanced Configuration
+## Project Structure
 
-You can modify the service port or host in both the Node.js server (`server.js`) and the Python client (`equity_client.py`).
+- `server.mjs`: The Express server that exposes the equity calculation API
+- `src/simulation/equity_calculator.mjs`: The core equity calculation function
+- `src/simulation/equity_client.py`: Python client that communicates with the Express service
+- `src/simulation/preflop_env.py`: The pre-flop MDP environment that uses equity calculations
+- `src/simulation/game_rules.py`: Enforces the rules of Texas Hold'em poker
+
+## Configuration
+
+You can modify the service port or host in both `server.mjs` and `src/simulation/equity_client.py` if needed.

@@ -9,7 +9,7 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # Import MDPoker components
-from src.poker_engine import PokerEngine
+from simulation.poker_engine import PokerEngine
 from src.bot import GTOBot
 from src.table import Table
 

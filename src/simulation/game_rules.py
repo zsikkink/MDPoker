@@ -405,7 +405,7 @@ class GameRules:
                 state.current_player = dealer_id
 
 
-def calculate_reward(state: GameState, player_id: str, equity_calculator=None) -> float:
+def calculate_reward(state: GameState, player_id: str, equity_calculator=None, equity_client=None) -> float:
     """
     Calculate the reward for a player based on the current game state.
     
@@ -413,6 +413,7 @@ def calculate_reward(state: GameState, player_id: str, equity_calculator=None) -
         state: Current game state
         player_id: ID of the player to calculate reward for
         equity_calculator: Optional function to calculate equity between hands
+        equity_client: Optional EquityClient instance for using the Express service
         
     Returns:
         Reward value for the player
@@ -435,8 +436,23 @@ def calculate_reward(state: GameState, player_id: str, equity_calculator=None) -
         opponent_id = next(pid for pid in state.positions if pid != player_id)
         opponent_hand = state.hole_cards[opponent_id]
         
+        # Try using equity client first (from Express service)
+        if equity_client is not None:
+            try:
+                player_equity, opponent_equity = equity_client.calculate_equity(
+                    player_hand, opponent_hand
+                )
+            except Exception as e:
+                print(f"Error using equity client: {e}")
+                # Fallback to provided equity calculator
+                if equity_calculator:
+                    player_equity, opponent_equity = equity_calculator(player_hand, opponent_hand)
+                else:
+                    # Fallback to simple estimation
+                    player_equity = 0.5
+                    opponent_equity = 0.5
         # If equity calculator is provided, use it
-        if equity_calculator:
+        elif equity_calculator:
             player_equity, opponent_equity = equity_calculator(player_hand, opponent_hand)
         else:
             # Fallback to simple estimation (not accurate)

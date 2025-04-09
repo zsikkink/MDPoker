@@ -1,4 +1,4 @@
-import { CardGroup, OddsCalculator } from ‘poker-odds-calculator’;
+import { CardGroup, OddsCalculator } from 'poker-odds-calculator';
 
 export function calculatePlayerEquity(player1Hand, player2Hand, boardStr) {
 const player1Cards = CardGroup.fromString(player1Hand);

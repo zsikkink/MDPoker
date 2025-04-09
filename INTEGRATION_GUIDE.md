@@ -10,22 +10,13 @@ Your MDPoker project models poker as an MDP with a reward function that uses equ
 
 The integration uses a client-server architecture:
 
-1. **Node.js Server**: A persistent Express server that exposes the JavaScript equity calculator as an API endpoint
-2. **Python Client**: A lightweight client that communicates with the server via HTTP requests
-3. **Integration Layer**: Python code that bridges the MDPoker project with the equity calculator client
+1. **Node.js Express Server**: A persistent server that directly imports the `equity_calculator.mjs` module to expose the JavaScript equity calculator as an API endpoint
+2. **Python Equity Client**: A lightweight client that communicates with the server via HTTP requests
+3. **PreflopEnv Integration**: The preflop environment directly uses the equity client for accurate calculations
 
 ## Setting Up the Integration
 
-### 1. Install the Required Files
-
-Place these files in your MDPoker project directory:
-
-- `server.js`: The Express server that exposes the equity calculator API
-- `equity_client.py`: The Python client for the equity calculator service 
-- `setup.sh`: Script to install dependencies
-- `mdpoker_integration.py`: Example of how to integrate with MDPoker
-
-### 2. Install Dependencies
+### 1. Install the Required Dependencies
 
 Run the setup script to install all required dependencies:
 
@@ -34,134 +25,86 @@ chmod +x setup.sh
 ./setup.sh
 ```
 
-### 3. Start the Node.js Service
+### 2. Start the Node.js Service
 
 Start the equity calculator service:
 
 ```bash
-node server.js
+npm start
 ```
 
 Keep this service running in the background while you use your MDPoker project.
 
-## Integrating with Your MDP Model
+## Using the PreflopEnv Environment
 
-### 1. Update Your Reward Function
-
-The reward function in your MDP model can now use the JavaScript equity calculator for more accurate equity calculations. Here's how to modify your code:
-
-1. Import the HybridEquityEstimator:
+The `PreflopEnv` class now has built-in support for using the equity calculator service:
 
 ```python
-from mdpoker_integration import HybridEquityEstimator
+from src.simulation.preflop_env import PreflopEnv
+
+# Create an environment with the equity service enabled (default)
+env = PreflopEnv(use_express_service=True)
+
+# Or use without the service
+env = PreflopEnv(use_express_service=False, equity_calculator=my_custom_calculator)
 ```
 
-2. Initialize the estimator:
+The environment will automatically:
 
-```python
-equity_estimator = HybridEquityEstimator()
+1. Try to connect to the equity calculation service
+2. Use it for accurate equity calculations if available
+3. Fall back to a provided calculator or simple estimation if the service is unavailable
+
+## How the Integration Works
+
+### 1. Equity Calculation Flow
+
+When the `PreflopEnv` needs to calculate equity (for rewards or winner determination):
+
+1. It sends the hole cards to the equity client
+2. The client formats the request and sends it to the Express server
+3. The server uses the imported `calculatePlayerEquity` function to calculate accurate equity
+4. The result is returned to the Python environment
+
+### 2. Fallback Mechanism
+
+If the Express service is unavailable or encounters an error:
+
+1. The equity client will log a warning
+2. The client will attempt to use a provided custom equity calculator
+3. If no custom calculator is available, it will use a simple estimation
+
+## Testing the Integration
+
+You can test the integration by running the preflop environment directly:
+
+```bash
+python -m src.simulation.preflop_env
 ```
 
-3. Update your reward function to use the estimator:
+This will test both modes (with and without the Express service).
+
+## Customization
+
+### Modifying the Equity Calculation
+
+If you need to modify the equity calculation algorithm:
+
+1. Update `src/simulation/equity_calculator.mjs` to implement your algorithm
+2. The Express server automatically uses the updated implementation
+
+### Using in Custom Environments
+
+To use the equity calculator in your own custom environments:
 
 ```python
-def calculate_reward(self, state, action, next_state):
-    # For transitions to terminal states (when someone folds)
-    if next_state.is_terminal():
-        if next_state.winner == self.player_id:
-            return next_state.pot_size
-        else:
-            return -next_state.pot_size
-    
-    # For transitions to the flop (both players continue)
-    elif next_state.betting_round == 'flop':
-        # Get hole cards for both players
-        player_hole_cards = state.hole_cards[self.player_id]
-        opponent_hole_cards = state.hole_cards[self.opponent_id]
-        
-        # Calculate equity using the JavaScript service
-        player_equity, opponent_equity = equity_estimator.calculate_preflop_equity(
-            player_hole_cards, opponent_hole_cards
-        )
-        
-        # Apply the reward formula: R_i = (2*e_i - 1) * P
-        return (2 * player_equity - 1) * next_state.pot_size
-    
-    # For other transitions (e.g., raising but still in preflop)
-    else:
-        return 0  # No immediate reward
-```
+from src.simulation.equity_client import EquityClient
 
-### 2. Updating Your State Definition
-
-If your state definition includes equity calculations, you can update those as well:
-
-```python
-def update_state_features(self, state):
-    # Calculate current equity and add it to the state features
-    if hasattr(state, 'opponent_hole_cards') and state.opponent_hole_cards:
-        # If opponent cards are known (e.g., in training with perfect information)
-        player_equity, _ = self.equity_estimator.calculate_preflop_equity(
-            state.hole_cards, state.opponent_hole_cards
-        )
-    else:
-        # If opponent cards are unknown, use average equity against a range
-        player_equity = self.calculate_equity_vs_range(state.hole_cards, state.opponent_range)
-    
-    # Add equity to state features
-    state.features['equity'] = player_equity
-    
-    return state
-```
-
-### 3. Creating a Custom MDP Environment
-
-You can create a custom MDP environment that uses the JavaScript equity calculator:
-
-```python
-class EquityEnhancedMDP:
+class MyCustomEnvironment:
     def __init__(self):
-        self.equity_estimator = HybridEquityEstimator()
-        # Other initialization code
-    
-    def step(self, state, action):
-        # Determine the next state based on the current state and action
-        next_state = self.transition(state, action)
+        self.equity_client = EquityClient()
         
-        # Calculate reward using equity
-        reward = self.calculate_reward(state, action, next_state)
-        
-        # Check if the next state is terminal
-        done = next_state.is_terminal()
-        
-        return next_state, reward, done
-    
-    # Implement other MDP methods...
+    def calculate_hand_strength(self, hand1, hand2, board=None):
+        equity1, equity2 = self.equity_client.calculate_equity(hand1, hand2, board)
+        return equity1  # Return player 1's equity
 ```
-
-## Performance Considerations
-
-- **Service Startup**: Start the Node.js service before running your Python code to avoid connection errors
-- **Connection Pooling**: The Python client maintains a persistent connection to the Node.js service
-- **Error Handling**: The client includes fallback mechanisms if the service is unavailable
-
-## Additional Use Cases
-
-The integration can be extended for:
-
-1. **Training Data Generation**: Generate training data with accurate equity calculations
-2. **Strategy Evaluation**: Evaluate different strategies against each other
-3. **Monte Carlo Simulations**: Run Monte Carlo simulations with accurate equity estimation
-
-## Troubleshooting
-
-If you encounter issues:
-
-1. Ensure the Node.js service is running
-2. Check for error messages in both the Node.js console and Python output
-3. Verify that the server and client are configured to use the same port
-4. Check that all dependencies are installed correctly
-
-## Example Integration
-
-See `mdpoker_integration.py` for a complete example of how to integrate the JavaScript equity calculator with your MDPoker project.
