@@ -1,5 +1,13 @@
 {
+  "name": "equity-calculator-service",
+  "version": "1.0.0",
+  "description": "Poker equity calculator service for MDPoker",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
   "dependencies": {
-    "poker-odds-calculator": "^0.3.1"
+    "express": "^4.18.2",
+    "poker-odds-calculator": "*"
   }
 }
