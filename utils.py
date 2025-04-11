@@ -2,6 +2,13 @@
 
 import random
 import requests
+from typing import Dict, List, Tuple, Optional, Any
+
+# Action type constants
+ACTION_FOLD = "fold"
+ACTION_CALL = "call" 
+ACTION_CHECK = "check"
+ACTION_RAISE = "raise"
 
 def shuffle_deck():
     """
@@ -100,8 +107,6 @@ def calculate_equity(player1_hand, player2_hand):
     equity2 = round(equity2, 3)
     
     return equity1, equity2
-
-
 # Dictionary of 169 Texas Hold’em starting hands mapped to their estimated equity vs. a random hand.
 hand_vs_random = {
     # Pocket Pairs (13 hands)
@@ -200,9 +205,6 @@ def estimate_equity(hand: str) -> float:
     except KeyError:
         raise ValueError(f"Hand '{hand}' not found in the equity lookup table.")
 
-
-
-
 def classify_hand(hand):
     """
     Classifies a poker hand based on the input string and returns an equity estimate.
@@ -253,7 +255,7 @@ def classify_hand(hand):
 
     # Determine if the two ranks are connected.
     connected_pairs = set()
-    connectivity_string = "23456789TJQK"  # Exclude Ace for now.
+    connectivity_string = "23456789TJQK"
     for i in range(len(connectivity_string) - 1):
         pair_tuple = (connectivity_string[i], connectivity_string[i+1])
         connected_pairs.add(pair_tuple)
@@ -279,7 +281,6 @@ def classify_hand(hand):
 
     return classified, suited, pair, connected, estimated_equity
 
-
 def calculate_reward_no_fold(equity1: float, equity2: float, contributions: dict) -> tuple:
     """
     Calculate the reward for two players when neither player folds,
@@ -302,7 +303,6 @@ def calculate_reward_no_fold(equity1: float, equity2: float, contributions: dict
     reward1 = (2 * equity1 - 1) * pot
     reward2 = (2 * equity2 - 1) * pot
     return reward1, reward2
-
 
 def calculate_reward_fold(folding_player: str, contributions: dict) -> tuple:
     """
@@ -347,7 +347,6 @@ def calculate_reward_fold(folding_player: str, contributions: dict) -> tuple:
         
     return reward_BTN, reward_BB
 
-
 def update_contributions(contributions, player, amount):
     """
     Update a player's contribution to the pot.
@@ -365,7 +364,6 @@ def update_contributions(contributions, player, amount):
     contributions[player] += amount
     return contributions
 
-
 def calculate_pot(contributions):
     """
     Calculate the total pot size based on all players' contributions.
@@ -377,7 +375,6 @@ def calculate_pot(contributions):
         float: The total pot size.
     """
     return sum(contributions.values())
-
 
 def calculate_implied_probability(contributions):
     """
@@ -421,9 +418,344 @@ def calculate_implied_probability(contributions):
     
     return implied_probability
 
+# ============================================================
+# Restructured Functions (previously using mdp_components)
+# ============================================================
 
+def format_betting_history_for_rl(betting_history):
+    """
+    Converts the raw betting history into a structured format suitable for reinforcement learning.
+    
+    Args:
+        betting_history (list): The raw betting history from the environment
+        
+    Returns:
+        dict: A structured representation with the following keys:
+            - num_actions: Total number of actions taken
+            - num_raises: Number of raises
+            - num_calls: Number of calls
+            - num_checks: Number of checks
+            - last_action_type: Encoded last action (0=none, 1=fold, 2=check, 3=call, 4=raise)
+            - last_action_player: Encoded player (0=none, 1=BTN, 2=BB)
+            - last_action_amount: Amount of the last action (0 for fold/check)
+            - last_raise_size: Size of the last raise (0 if no raises)
+            - btn_aggression: Ratio of raises to total actions by BTN
+            - bb_aggression: Ratio of raises to total actions by BB
+    """
+    if not betting_history:
+        return {
+            "num_actions": 0,
+            "num_raises": 0,
+            "num_calls": 0,
+            "num_checks": 0,
+            "last_action_type": 0,  # 0 means no action yet
+            "last_action_player": 0,  # 0 means no player yet
+            "last_action_amount": 0,
+            "last_raise_size": 0,
+            "btn_aggression": 0,
+            "bb_aggression": 0
+        }
+    
+    # Count actions by type
+    num_raises = sum(1 for action in betting_history if action['action'] == 'raise')
+    num_calls = sum(1 for action in betting_history if action['action'] == 'call')
+    num_checks = sum(1 for action in betting_history if action['action'] == 'check')
+    
+    # Get the last action information
+    last_action = betting_history[-1]
+    last_action_type = {
+        'fold': 1,
+        'check': 2,
+        'call': 3,
+        'raise': 4
+    }.get(last_action['action'], 0)
+    
+    last_action_player = 1 if last_action['player'] == 'BTN' else 2
+    last_action_amount = last_action.get('amount', 0) if 'amount' in last_action else 0
+    
+    # Calculate last raise size
+    last_raise_size = 0
+    for action in reversed(betting_history):
+        if action['action'] == 'raise' and 'amount' in action:
+            # Find the previous bet to calculate the raise size
+            prev_bet = 0
+            for prev_action in reversed(betting_history[:betting_history.index(action)]):
+                if 'amount' in prev_action:
+                    prev_bet = prev_action['amount']
+                    break
+            last_raise_size = action['amount'] - prev_bet
+            break
+    
+    # Calculate aggression metrics
+    btn_actions = [a for a in betting_history if a['player'] == 'BTN']
+    bb_actions = [a for a in betting_history if a['player'] == 'BB']
+    
+    btn_aggression = sum(1 for a in btn_actions if a['action'] == 'raise') / len(btn_actions) if btn_actions else 0
+    bb_aggression = sum(1 for a in bb_actions if a['action'] == 'raise') / len(bb_actions) if bb_actions else 0
+    
+    return {
+        "num_actions": len(betting_history),
+        "num_raises": num_raises,
+        "num_calls": num_calls,
+        "num_checks": num_checks,
+        "last_action_type": last_action_type,
+        "last_action_player": last_action_player,
+        "last_action_amount": last_action_amount,
+        "last_raise_size": last_raise_size,
+        "btn_aggression": btn_aggression,
+        "bb_aggression": bb_aggression
+    }
 
+def get_available_actions(current_bet: float, player_stack: float, is_dealer: bool, 
+                          opponent_contributions: float = None) -> List[Dict[str, Any]]:
+    """
+    Returns available actions for a player (other than the BB checking scenario).
+    The three options are always: fold, call, and (if affordable) raise.
+    
+    When raising, the player's total contribution after the raise
+    must be at least their current contribution plus 2 × (opponent_contributions).
+    
+    Parameters:
+        current_bet (float): The amount the player is required to call.
+        player_stack (float): The player's remaining chips.
+        is_dealer (bool): True if the player is the BTN (dealer), else False.
+        opponent_contributions (float): The opponent's total contribution.
+                                       If provided, the minimum target is computed using it.
+    
+    Returns:
+        A list of dictionaries representing the available actions.
+        For a raise action, the dictionary has a key 'raise_amount' indicating the new total contribution target.
+    """
+    actions = []
+    
+    # Option 1: Always allow folding.
+    actions.append({'action_type': 'fold'})
+    
+    # Option 2: Always allow calling.
+    actions.append({'action_type': 'call'})
+    
+    # Determine the player's current contribution.
+    # Pre-flop, by convention:
+    #   - BTN (dealer) posts a 0.5 blind.
+    #   - BB posts a 1.0 blind.
+    player_contribution = 0.5 if is_dealer else 1.0
 
+    # Compute how much more the player needs to add in order to call.
+    to_call = max(0, current_bet - player_contribution)
+    
+    # Compute the remaining stack after calling.
+    remaining = player_stack - to_call
+    
+    # Determine the minimum allowed new total contribution if the player raises.
+    # If opponent_contributions is provided, then the raise must bring the player's total
+    # to at least: player_contribution + 2 × opponent_contributions.
+    # Otherwise, default to a minimum target of 2.0.
+    if opponent_contributions is not None:
+        min_target = player_contribution + 2 * opponent_contributions
+    else:
+        min_target = 2.0
+
+    # Allowed discrete targets for total contribution after a raise.
+    discrete_targets = [2, 3, 4, 5, 9, 15, 25, 50]
+    raise_options = []
+    
+    # For each discrete target, the option is valid only if:
+    #   - It exceeds the player's current contribution,
+    #   - It is at least as high as min_target,
+    #   - And the additional amount (target - current contribution) is affordable (<= remaining).
+    for target in discrete_targets:
+        if target < min_target or target <= player_contribution:
+            continue
+        if (target - player_contribution) <= remaining:
+            raise_options.append(target)
+    
+    # Always include an "all in" option if it yields a total contribution
+    # that is above the current bet and isn’t already in the list.
+    all_in_total = player_contribution + remaining
+    if all_in_total > current_bet and all_in_total not in raise_options:
+        raise_options.append(all_in_total)
+    
+    # Add raise options to the action list.
+    for option in raise_options:
+        actions.append({'action_type': 'raise', 'raise_amount': option})
+    
+    return actions
+
+def BB_actions(player_stack: float, opponent_contributions: float) -> List[Dict[str, Any]]:
+    """
+    Returns available actions for the BB when the BTN has already called the BB's initial blind.
+    The BB's options are: check or raise.
+    
+    When raising, the BB's total contribution must be at least:
+        player's current contribution + 2 × (opponent_contributions).
+    
+    Parameters:
+        player_stack (float): The BB's available chips.
+        opponent_contributions (float): The opponent's total contribution.
+                                       (For BB, typically the BTN's blind.)
+    
+    Returns:
+        A list of dictionaries representing the available actions.
+        For raise actions, the 'raise_amount' indicates the new total contribution target.
+    """
+    actions = []
+    
+    # Option 1: Offer the check action.
+    actions.append({'action_type': 'check'})
+    
+    # For BB, the current contribution is fixed at 1.0.
+    player_contribution = 1.0
+    # In this scenario, assume the BTN's call means there is no extra bet pending.
+    current_bet = 0.0  
+    to_call = max(0, current_bet - player_contribution)
+    remaining = player_stack - to_call
+    
+    # Use opponent_contributions to determine the minimum new total target for a raise.
+    if opponent_contributions is not None:
+        min_target = player_contribution + 2 * opponent_contributions
+    else:
+        min_target = 2.0
+    
+    discrete_targets = [2, 3, 4, 5, 9, 15, 25, 50]
+    raise_options = []
+    
+    for target in discrete_targets:
+        if target < min_target or target <= player_contribution:
+            continue
+        if (target - player_contribution) <= remaining:
+            raise_options.append(target)
+    
+    all_in_total = player_contribution + remaining
+    if all_in_total > current_bet and all_in_total not in raise_options:
+        raise_options.append(all_in_total)
+    
+    for option in raise_options:
+        actions.append({'action_type': 'raise', 'raise_amount': option})
+        
+    return actions
+
+def get_state(player_position, player_hand, stack_sizes, contributions, betting_history, is_first_action=False):
+    """
+    Constructs a complete state representation for a reinforcement learning agent
+    during their turn to act in a poker hand. Returns a dictionary instead of AgentState class.
+    
+    Args:
+        player_position (str): Position of the player ('BTN' or 'BB')
+        player_hand (str): Four-character string representing the player's hole cards
+        stack_sizes (dict): Dictionary mapping positions to current stack sizes
+        contributions (dict): Dictionary mapping positions to pot contributions
+        betting_history (list): List of actions taken during the current hand
+        is_first_action (bool): Whether this is the first action in the hand
+        
+    Returns:
+        dict: Complete state information with all information an agent needs to make a decision
+    """
+    # 1. Process the player's hole cards
+    classified, suited, pair, connected, estimated_equity = classify_hand(player_hand)
+    hole_cards = {
+        'classified': classified,
+        'suited': suited,
+        'pair': pair, 
+        'connected': connected,
+        'estimated_equity': estimated_equity
+    }
+    
+    # 2. Calculate the current pot size
+    pot_size = calculate_pot(contributions)
+    
+    # 3. Determine the opponent's position
+    opponent_position = 'BB' if player_position == 'BTN' else 'BTN'
+    
+    # 4. Calculate current bet to call
+    player_contribution = contributions.get(player_position, 0)
+    opponent_contribution = contributions.get(opponent_position, 0)
+    current_bet_to_call = max(0, opponent_contribution - player_contribution)
+    
+    # 5. Determine the last raise size (if any)
+    last_raise_size = None
+    for action in reversed(betting_history):
+        if action['action'] == 'raise' and 'amount' in action:
+            # Find the previous bet to calculate the raise size
+            prev_bet = 0
+            for prev_action in reversed(betting_history[:betting_history.index(action)]):
+                if 'amount' in prev_action:
+                    prev_bet = prev_action['amount']
+                    break
+            last_raise_size = action['amount'] - prev_bet
+            break
+    
+    # 6. Calculate implied probability (if applicable)
+    implied_probability = None
+    if current_bet_to_call > 0:
+        implied_probability = calculate_implied_probability(contributions)
+    
+    # 7. Format betting history for reinforcement learning
+    structured_history = format_betting_history_for_rl(betting_history)
+    
+    # 8. Create and return the complete state object as a dictionary
+    state = {
+        'my_hole_cards': hole_cards,
+        'stack_sizes': stack_sizes,
+        'pot_size': pot_size,
+        'betting_history': betting_history,
+        'structured_betting_history': structured_history,
+        'implied_probability': implied_probability,
+        'position': player_position,
+        'current_bet_to_call': current_bet_to_call,
+        'is_first_action': is_first_action,
+        'last_raise_size': last_raise_size
+    }
+    
+    return state
+
+def get_state_vector_for_deep_rl(state_dict):
+    """Enhanced state vector optimized for deep learning algorithms
+    
+    Args:
+        state_dict (dict): A dictionary of state information from get_state()
+        
+    Returns:
+        list: A normalized vector suitable for neural network input
+    """
+    # Create a normalized vector with position encoding
+    position_encoding = 1.0 if state_dict['position'] == "BTN" else 0.0
+    
+    state_vector = [
+        # Position information (one-hot encoded)
+        position_encoding,
+        
+        # Hand strength features
+        state_dict['my_hole_cards']['estimated_equity'],
+        int(state_dict['my_hole_cards']['suited']),
+        int(state_dict['my_hole_cards']['pair']),
+        int(state_dict['my_hole_cards']['connected']),
+        
+        # Additional hand strength indicators (derived features)
+        1.0 if state_dict['my_hole_cards']['estimated_equity'] > 0.70 else 0.0,  # Premium hand indicator
+        1.0 if (state_dict['my_hole_cards']['pair'] and 
+                state_dict['my_hole_cards']['classified'] in ['AA', 'KK', 'QQ']) else 0.0,  # Premium pair
+        
+        # Stack and pot information (normalized)
+        state_dict['stack_sizes'][state_dict['position']] / 100,
+        state_dict['stack_sizes']['BB' if state_dict['position'] == 'BTN' else 'BTN'] / 100,
+        state_dict['pot_size'] / 100,
+        
+        # Stack-to-pot ratio (SPR) - critical for decision making
+        (state_dict['stack_sizes'][state_dict['position']] / max(1.0, state_dict['pot_size'])),
+        
+        # Betting dynamics
+        state_dict['current_bet_to_call'] / 100,
+        state_dict['last_raise_size'] / 100 if state_dict['last_raise_size'] else 0.0,
+        state_dict['implied_probability'] if state_dict['implied_probability'] is not None else 0.0,
+        
+        # Betting history features
+        state_dict['structured_betting_history']['btn_aggression'],
+        state_dict['structured_betting_history']['bb_aggression'],
+        state_dict['structured_betting_history']['num_raises'] / 5,
+        float(state_dict['is_first_action'])
+    ]
+    
+    return state_vector
 
 def main():
     # Shuffle the deck.
